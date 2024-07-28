@@ -1542,7 +1542,7 @@ class BurpExtender(IBurpExtender, IScannerCheck,
                         issue.httpMessagesPy = [urr.upload_rr, urr.download_rr]
                         self._add_scan_issue(issue)
 
-    def _ghostscript_cve_2024_29510():
+    def _ghostscript_cve_2024_29510(self):
         return """
 %!PS-Adobe-3.0 EPSF-3.0
 %%Pages: 1

